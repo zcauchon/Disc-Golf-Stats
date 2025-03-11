@@ -1,8 +1,7 @@
 from bs4 import BeautifulSoup
 import pandas as pd
 from requests import get
-import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
+from ..constants import request_status
 
 def event_info_extractor(event_id):
     url = f"https://www.pdga.com/tour/event/{event_id}"
@@ -18,7 +17,7 @@ def event_info_extractor(event_id):
             event_date = event_info.find('li', attrs={'class':"tournament-date"}).text.split(':')[1].strip()
             event_location = event_info.find('li', attrs={'class':"tournament-location"}).text.split(":")[1].strip()
             event_city, event_state, event_country = event_location.split(",")
-            event_director = event_info.find('li', attrs={'class': "tournament-director"}).text.split(":")[1].strip()
+            event_director = event_info.find('li', attrs={'class': lambda L: L and L.endswith("-director")}).text.split(":")[1].strip()
             event_type = event_info.find("h4").text
             event_view = soup.find_all("div", attrs={"class":"pane-tournament-event-view"})
             if event_view is not None:
@@ -26,7 +25,7 @@ def event_info_extractor(event_id):
                 if "Event complete" not in event_status:
                     # event not finalized, dont gather data
                     print('Event still pending', event_id)
-                    return None
+                    return request_status.incomplete, None
                 event_player_count = event_view[0].find("td", attrs={"class":"players"}).text
                 try:
                     event_purse = event_view.find("td", attrs={"class":"purse"}).text
@@ -61,11 +60,15 @@ def event_info_extractor(event_id):
                         except AttributeError:
                             player_points = ""
                         player_pdga = player.find("td", attrs={"class":"pdga-number"}).text
-                        player_rating = player.find("td", attrs={"class":"player-rating"}).text
+                        try:
+                            player_rating = player.find("td", attrs={"class":"player-rating"}).text
+                        except AttributeError:
+                            player_rating = ""
                         player_round_score = player.find_all("td", attrs={"class":"round"})[int(round_id)-1].text
                         player_round_rating = player.find_all("td", attrs={"class":"round-rating"})[int(round_id)-1].text
                         # add all the info to the record list
                         records.append([
+                            event_id,
                             event_name,
                             event_date,
                             event_city,
@@ -90,64 +93,33 @@ def event_info_extractor(event_id):
                         ])
 
             df = pd.DataFrame(columns=[
-                "event_name",
-                "event_date",
-                "event_city",
-                "event_state",
-                "event_country",
-                "event_director",
-                "event_type",
-                "event_player_count",
-                "event_purse",
-                "event_division",
-                "round_number",
-                "round_course",
-                "round_layout",
-                "layout_holes",
-                "layout_par",
-                "layout_distance",
-                "player_pdga",
-                "player_earned_points",
-                "player_rating",
-                "player_round_score",
-                "player_round_rating"
+                "EVENT_ID",
+                "EVENT_NAME",
+                "EVENT_DATE",
+                "EVENT_CITY",
+                "EVENT_STATE",
+                "EVENT_COUNTRY",
+                "EVENT_DIRECTOR",
+                "EVENT_TYPE",
+                "EVENT_PLAYER_COUNT",
+                "EVENT_PURSE",
+                "EVENT_DIVISION",
+                "ROUND_NUMBER",
+                "ROUND_COURSE",
+                "ROUND_LAYOUT",
+                "LAYOUT_HOLES",
+                "LAYOUT_PAR",
+                "LAYOUT_DISTANCE",
+                "PLAYER_PDGA",
+                "PLAYER_EARNED_POINTS",
+                "PLAYER_RATING",
+                "PLAYER_ROUND_SCORE",
+                "PLAYER_ROUND_RATING"
             ], data=records)
-    except AttributeError as e:
+    except (AttributeError, IndexError) as e:
         print("Error loading information for", event_id, e)
-        return None
-
-    return df
-
-def main():    
-    
-    # process event
-    # get pending events from db (eventually filter out dups and pick up pendings)
-    # create task list
-    # wait for all the complete
-    # save df to stg
-        with snowflake.connector.connect(
-            connection_name="stg"
-        ) as con:
-            _sql = """select event_id 
-                    from pdga_db.pdga_stg.EVENT_REQUESTS s
-                    --where event_id = 87901
-                    union
-                    select event_id
-                    from pdga_db.pdga.EVENT_REQUESTS e
-                    where e.status = 2
-                    minus
-                    select event_id
-                    from pdga_db.pdga.EVENT_REQUESTS e
-                    where e.status in (3,4)"""
-            pending_events = con.cursor().execute(_sql) # this feels so wrong, can i make this a dbt query?
-            results = pd.DataFrame()
-            for event in pending_events:
-                event_info = event_info_extractor(event[0])
-                if event_info is not None:
-                    results = pd.concat([results, event_info])
-            if len(results) > 0:
-                print(f"Writing {len(results)} new events to EVENTS_INFO")
-                write_pandas(con, results, "EVENTS_INFO", auto_create_table=True, overwrite=True)
-
-if __name__ == '__main__':
-    main()
+        return request_status.errored, None
+    except Exception as e:
+        print('UKNOWN ERROR!!', e)
+        return request_status.errored, None
+    return request_status.complete, df
