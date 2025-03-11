@@ -11,7 +11,9 @@ daily_refresh_job = define_asset_job(
         "player_dim",
         "event_dim",
         "course_layout_dim",
-        "event_score_fact"
+        "event_score_fact",
+        "most_active_players",
+        "event_attendance"
     ]
 )
 

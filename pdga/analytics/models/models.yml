@@ -11,5 +11,6 @@ sources:
           - name: scrape_date
           - name: status
       - name: event_dim
-      - name: player_dim_snapshot
+      - name: player_dim
       - name: course_layout_dim
+      - name: event_score_fact
