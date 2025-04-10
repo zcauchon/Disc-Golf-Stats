@@ -9,7 +9,7 @@
 select distinct
     event_id,
     event_name,
-    to_varchar(to_date(split_part(event_date, ' ', -1))) as event_date,
+    split_part(event_date, ' ', -1)::date::text as event_date,
     event_city,
     event_state,
     event_country,

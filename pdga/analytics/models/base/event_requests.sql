@@ -4,7 +4,7 @@
     materialized = 'incremental',
     unique_key = ['event_id','scrape_date'],
     on_schema_change = 'sync_all_columns'
-  )
+  )  
 }}
 
 with details as (
