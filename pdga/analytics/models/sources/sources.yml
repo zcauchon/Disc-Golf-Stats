@@ -1,13 +1,13 @@
 version: 2
 
 sources:
-  - name: pdga_stg
+  - name: pdga
     tables:
       - name: event_requests
         meta:
           dagster:
-            asset_key: ["event_requests_stg"]
+            asset_key: ["event_requests"]
       - name: event_details
         meta:
           dagster:
-            asset_key: ["event_details_stg"]
+            asset_key: ["event_details"]

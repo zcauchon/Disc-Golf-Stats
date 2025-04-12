@@ -7,4 +7,7 @@ select distinct
     layout_holes,
     layout_par,
     layout_distance
-from {{ source('pdga_stg', 'event_details') }}
+from {{ source('pdga', 'event_details') }}
+{% if is_incremental() %}
+  where processing_date between '{{ var('start_date') }}' and '{{ var('end_date') }}'
+{% endif %}

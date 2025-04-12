@@ -16,4 +16,7 @@ select distinct
     event_director,
     event_type,
     event_purse
-from {{ source('pdga_stg', 'event_details') }}
+from {{ source('pdga', 'event_details') }}
+{% if is_incremental() %}
+  where processing_date between '{{ var('start_date') }}' and '{{ var('end_date') }}'
+{% endif %}

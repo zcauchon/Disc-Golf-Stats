@@ -3,7 +3,7 @@ import pandas as pd
 from requests import get
 from ..constants import request_status
 
-def event_info_extractor(event_id):
+def event_info_extractor(event_id, target_date):
     url = f"https://www.pdga.com/tour/event/{event_id}"
     try:
         with get(url) as page:
@@ -68,6 +68,7 @@ def event_info_extractor(event_id):
                         player_round_rating = player.find_all("td", attrs={"class":"round-rating"})[int(round_id)-1].text
                         # add all the info to the record list
                         records.append([
+                            target_date,
                             event_id,
                             event_name,
                             event_date,
@@ -93,6 +94,7 @@ def event_info_extractor(event_id):
                         ])
 
             df = pd.DataFrame(columns=[
+                'processing_date',
                 "event_id",
                 "event_name",
                 "event_date",

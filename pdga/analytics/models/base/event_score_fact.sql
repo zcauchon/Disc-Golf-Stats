@@ -16,5 +16,8 @@ select distinct
     round_number,
     player_round_score,
     player_round_rating
-from {{ source('pdga_stg', 'event_details') }}
+from {{ source('pdga', 'event_details') }}
 where player_pdga != ''
+{% if is_incremental() %}
+  and processing_date between '{{ var('start_date') }}' and '{{ var('end_date') }}'
+{% endif %}

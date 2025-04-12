@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 from requests import get
 from bs4 import BeautifulSoup
@@ -5,10 +6,10 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.types import Integer
 
-from .parser.extract_event_info import event_info_extractor
-from .orchestration.partitions import daily_partitions
-
 from .project import dbt_project
+from .constants import request_status
+from .orchestration.partitions import daily_partitions
+from .parser.extract_event_info import event_info_extractor
 
 from dagster import asset, AssetExecutionContext
 from dagster_dbt import dbt_assets, DbtCliResource
@@ -17,20 +18,17 @@ from dagster_dbt import dbt_assets, DbtCliResource
     group_name="web",
     compute_kind="python",
     partitions_def=daily_partitions,
-    pool="stg"
 )
-def event_requests_stg(context: AssetExecutionContext) -> None:
+def event_requests(context: AssetExecutionContext) -> None:
     """
         Find recently update events using pdga tour search
     """
 
     engine = create_engine("postgresql+psycopg2://edwetl:edwetl@localhost:5432/pdga")
     
-    start_date = context.partition_key
-    end_date = datetime.strptime(start_date, '%Y-%m-%d') + timedelta(days=1)
-    end_date = end_date.strftime('%Y-%m-%d')
+    target_date = context.partition_key
     url_base = 'https://www.pdga.com'
-    search_url = f'/tour/search?date_filter[min][date]={start_date}&date_filter[max][date]={end_date}&Country[]=United+States&Tier[]=A&Tier[]=A%2FB&Tier[]=A%2FC&Tier[]=B&Tier[]=B%2FA&Tier[]=B%2FC&Tier[]=C&Tier[]=C%2FA&Tier[]=C%2FB'
+    search_url = f'/tour/search?date_filter[min][date]={target_date}&date_filter[max][date]={target_date}&Country[]=United+States&Tier[]=A&Tier[]=A%2FB&Tier[]=A%2FC&Tier[]=B&Tier[]=B%2FA&Tier[]=B%2FC&Tier[]=C&Tier[]=C%2FA&Tier[]=C%2FB'
     results = []
 
     while True:
@@ -41,7 +39,7 @@ def event_requests_stg(context: AssetExecutionContext) -> None:
         for event in soup.find_all('td', attrs={'class':'views-field-OfficialName'}):
             event_url = f'{url_base}{event.a["href"]}'
             # add event to results
-            results.append([event_url.split('/')[-1], date.today(), 1])
+            results.append([event_url.split('/')[-1], target_date, 1])
         # check if there are paged results
         next_page = soup.find("li", attrs={"class":"pager-next"})
         if next_page is None:
@@ -52,61 +50,74 @@ def event_requests_stg(context: AssetExecutionContext) -> None:
         search_url = next_page.a["href"]
     
     # once everything has been identified
-    # create df of new events and save to stg
-    df = pd.DataFrame(columns=["event_id", "scrape_date", "status"], data=results)
+    # create df of new events and save to table
+    df = pd.DataFrame(columns=["event_id", "event_date", "status"], data=results)
     df.drop_duplicates(inplace=True)
     with engine.begin() as con:
         nrows = 0
         if len(df) > 0:
-            nrows = df.to_sql('event_requests', schema="pdga_stg", if_exists="replace", con=con, index=False, dtype={"event_id": Integer})
+            con.execute(text(f"delete from pdga.event_requests where event_date = '{target_date}'"))
+            nrows = df.to_sql('event_requests', schema="pdga", if_exists="append", con=con, index=False, dtype={"event_id": Integer})
     print(f'Loaded {nrows} rows for processing')
 
 @asset(
-    deps=[event_requests_stg],
+    deps=[event_requests],
     group_name="web",
     compute_kind="python",
-    pool="stg"
+    partitions_def=daily_partitions,
 )
-def event_details_stg() -> pd.DataFrame:
+def event_details(context: AssetExecutionContext) -> pd.DataFrame:
     """
         Get event details for identified events
     """
 
     engine = create_engine("postgresql+psycopg2://edwetl:edwetl@localhost:5432/pdga")
 
-    with engine.begin() as con:
-        _sql = """select distinct event_id 
-                from pdga_stg.event_requests s
-                where status = 1
+    target_date = context.partition_key
+
+    with engine.connect() as con:
+        _sql = f"""select distinct event_id 
+                from pdga.event_requests s
+                where event_date = '{target_date}'
                 union
                 select event_id
                 from pdga.event_requests
                 where status = 2
-                and scrape_date < CURRENT_DATE-5
+                and retry_date = '{target_date}'
                 except
                 select event_id 
                 from pdga.event_requests
                 where status = 4;"""
         pending_events = con.execute(text(_sql))
+        con.commit()
         results = pd.DataFrame()
         for event in pending_events:
-            status, event_info = event_info_extractor(event[0])
-            # would probably be better to do this all at once
-            con.execute(text(f"update pdga_stg.event_requests set status = {status} where event_id = {event[0]}"))
+            status, event_info = event_info_extractor(event[0], target_date)
+            update_clause = f"set status = {status}"
+            if status == request_status.incomplete:
+                update_clause = update_clause + ", retry_date = current_date+5"
+            _sql = f"update pdga.event_requests {update_clause} where event_id = {event[0]}"
+            con.execute(text(_sql))
+            con.commit()
             if event_info is not None:
                 results = pd.concat([results, event_info])
-        con.execute(text("truncate pdga_stg.event_details"))
+        # anything left in a 1 status means we aleady had data for the event, dro pthe pending request
+        con.execute(text(f"delete from pdga.event_requests where status = {request_status.pending} and event_date = '{target_date}'"))
         if len(results) > 0:
-            print(f"Writing {len(results)} new events to event_details")
-            results.to_sql("event_details", con=con, schema="pdga_stg", index=False, if_exists="replace")
+            print(f"Writing {len(results)} new events to event_details for {target_date}")
+            results.to_sql("event_details", con=con, schema="pdga", index=False, if_exists="append")
+            con.commit()
     return results
 
 
 ### DBT ###
 @dbt_assets(
     manifest=dbt_project.manifest_path,
-    pool="stg"
+    partitions_def=daily_partitions,
 )
 def dbt_analytics(context: AssetExecutionContext, dbt: DbtCliResource):
-    dbt_build_invocation = dbt.cli(["build"], context=context)
-    yield from dbt_build_invocation.stream()
+    start, end = context.partition_key_range
+    dbt_vars = {"start_date": start, "end_date": end}
+    dbt_build_args = ["build", "--vars", json.dumps(dbt_vars)]
+    yield from dbt.cli(dbt_build_args, context=context).stream()
+    

@@ -6,7 +6,6 @@ setup(
     install_requires=[
         "dagster",
         "pandas",
-        "snowflake.connector",
     ],
     extras_require={"dev": ["dagster-webserver", "pytest"]},
 )

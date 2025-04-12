@@ -5,9 +5,8 @@ from datetime import timedelta
 daily_refresh_job = dg.define_asset_job(
     "daily_refresh",
     selection=[
-        "event_requests_stg",
-        "event_details_stg",
         "event_requests",
+        "event_details",
         "player_dim",
         "event_dim",
         "course_layout_dim",
@@ -15,8 +14,7 @@ daily_refresh_job = dg.define_asset_job(
         "requests_by_status_per_day",
         "event_attendance",
         "most_active_players"
-    ],
-    executor_def=dg.multiprocess_executor.configured({"max_concurrent":1})
+    ]
 )
 
 @dg.schedule(

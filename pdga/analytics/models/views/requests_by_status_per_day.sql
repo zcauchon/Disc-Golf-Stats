@@ -2,19 +2,19 @@
 {{
   config(
     materialized = 'incremental',
-    unique_key = ['scrape_date', 'status'],
+    unique_key = ['event_date', 'status'],
     on_schema_change = 'sync_all_columns'
   )
 }}
 
 select 
-    scrape_date,
+    event_date,
     status,
     count(event_id) as status_count
-from {{ ref('event_requests') }} 
+from {{ source('pdga', 'event_requests') }} 
 {% if is_incremental() %}
-  where scrape_date > (select max(scrape_date) from {{ this }})
+  where event_date between '{{ var('start_date') }}' and '{{ var('end_date') }}'
 {% endif %}
 group by 
-    scrape_date,
+    event_date,
     status
