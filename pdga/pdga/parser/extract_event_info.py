@@ -1,13 +1,19 @@
+import os
 from bs4 import BeautifulSoup
 import pandas as pd
 from requests import get
 from ..constants import request_status
 
-def event_info_extractor(event_id):
+def event_info_extractor(event_id, target_date):
     url = f"https://www.pdga.com/tour/event/{event_id}"
+    proxy = {
+        "http": os.getenv("PDGA_PROXY"),
+        "https": os.getenv("PDGA_PROXY")
+    }
     try:
-        with get(url) as page:
+        with get(url, proxies=proxy) as page:
             soup = BeautifulSoup(page.content, "html.parser")
+            #TODO: save soup (only error/complete)
 
             records = []
 
@@ -68,6 +74,7 @@ def event_info_extractor(event_id):
                         player_round_rating = player.find_all("td", attrs={"class":"round-rating"})[int(round_id)-1].text
                         # add all the info to the record list
                         records.append([
+                            target_date,
                             event_id,
                             event_name,
                             event_date,
@@ -93,28 +100,29 @@ def event_info_extractor(event_id):
                         ])
 
             df = pd.DataFrame(columns=[
-                "EVENT_ID",
-                "EVENT_NAME",
-                "EVENT_DATE",
-                "EVENT_CITY",
-                "EVENT_STATE",
-                "EVENT_COUNTRY",
-                "EVENT_DIRECTOR",
-                "EVENT_TYPE",
-                "EVENT_PLAYER_COUNT",
-                "EVENT_PURSE",
-                "EVENT_DIVISION",
-                "ROUND_NUMBER",
-                "ROUND_COURSE",
-                "ROUND_LAYOUT",
-                "LAYOUT_HOLES",
-                "LAYOUT_PAR",
-                "LAYOUT_DISTANCE",
-                "PLAYER_PDGA",
-                "PLAYER_EARNED_POINTS",
-                "PLAYER_RATING",
-                "PLAYER_ROUND_SCORE",
-                "PLAYER_ROUND_RATING"
+                'processing_date',
+                "event_id",
+                "event_name",
+                "event_date",
+                "event_city",
+                "event_state",
+                "event_country",
+                "event_director",
+                "event_type",
+                "event_player_count",
+                "event_purse",
+                "event_division",
+                "round_number",
+                "round_course",
+                "round_layout",
+                "layout_holes",
+                "layout_par",
+                "layout_distance",
+                "player_pdga",
+                "pleyer_earned_points",
+                "player_rating",
+                "player_round_score",
+                "player_round_rating" 
             ], data=records)
     except (AttributeError, IndexError) as e:
         print("Error loading information for", event_id, e)

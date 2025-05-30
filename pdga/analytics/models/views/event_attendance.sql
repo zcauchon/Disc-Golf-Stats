@@ -4,9 +4,9 @@ with event_counts as (
     group by event_id
 ),
 events as (
-    select event_id, date_trunc('month', date(event_date)) as event_date,
+    select event_id, date_trunc('month', date(event_date)) as event_date
     from {{ ref('event_dim') }}
-    where event_date >= dateadd('month', -36, current_date)
+    where event_date::timestamp >= now() + interval '-36 months'
 )
 select 
     e.event_date, 
