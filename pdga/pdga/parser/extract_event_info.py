@@ -1,3 +1,4 @@
+import os
 from bs4 import BeautifulSoup
 import pandas as pd
 from requests import get
@@ -5,9 +6,14 @@ from ..constants import request_status
 
 def event_info_extractor(event_id, target_date):
     url = f"https://www.pdga.com/tour/event/{event_id}"
+    proxy = {
+        "http": os.getenv("PDGA_PROXY"),
+        "https": os.getenv("PDGA_PROXY")
+    }
     try:
-        with get(url) as page:
+        with get(url, proxies=proxy) as page:
             soup = BeautifulSoup(page.content, "html.parser")
+            #TODO: save soup (only error/complete)
 
             records = []
 

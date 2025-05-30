@@ -1,9 +1,11 @@
+import os
 import json
+from time import sleep
 import pandas as pd
+from dotenv import load_dotenv
 from requests import get
 from bs4 import BeautifulSoup
-from datetime import date, datetime, timedelta
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, URL
 from sqlalchemy.types import Integer
 
 from .project import dbt_project
@@ -23,9 +25,23 @@ def event_requests(context: AssetExecutionContext) -> None:
     """
         Find recently update events using pdga tour search
     """
-
-    engine = create_engine("postgresql+psycopg2://edwetl:edwetl@localhost:5432/pdga")
+    #TODO: move db info into a resource
+    load_dotenv()
+    url_obj = URL.create(
+        "postgresql+psycopg2",
+        username=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASS"),
+        host=os.getenv("POSTGRES_URL"),
+        port=os.getenv("POSTGRES_PORT"),
+        database="pdga"
+    )
+    engine = create_engine(url_obj)
     
+    proxy = {
+        "http": os.getenv("PDGA_PROXY"),
+        "https": os.getenv("PDGA_PROXY")
+    }
+
     target_date = context.partition_key
     url_base = 'https://www.pdga.com'
     search_url = f'/tour/search?date_filter[min][date]={target_date}&date_filter[max][date]={target_date}&Country[]=United+States&Tier[]=A&Tier[]=A%2FB&Tier[]=A%2FC&Tier[]=B&Tier[]=B%2FA&Tier[]=B%2FC&Tier[]=C&Tier[]=C%2FA&Tier[]=C%2FB'
@@ -33,7 +49,7 @@ def event_requests(context: AssetExecutionContext) -> None:
 
     while True:
         # make request to find recent events
-        page = get(f"{url_base}{search_url}")
+        page = get(f"{url_base}{search_url}", proxies=proxy)
         soup = BeautifulSoup(page.content, "html.parser")
         # parse results 
         for event in soup.find_all('td', attrs={'class':'views-field-OfficialName'}):
@@ -56,7 +72,8 @@ def event_requests(context: AssetExecutionContext) -> None:
     with engine.begin() as con:
         nrows = 0
         if len(df) > 0:
-            con.execute(text(f"delete from pdga.event_requests where event_date = '{target_date}'"))
+            # clear any request already made for this date that isnt complete
+            con.execute(text(f"delete from pdga.event_requests where event_date = '{target_date}' and status != {request_status.complete}"))
             nrows = df.to_sql('event_requests', schema="pdga", if_exists="append", con=con, index=False, dtype={"event_id": Integer})
     print(f'Loaded {nrows} rows for processing')
 
@@ -70,8 +87,19 @@ def event_details(context: AssetExecutionContext) -> pd.DataFrame:
     """
         Get event details for identified events
     """
-
-    engine = create_engine("postgresql+psycopg2://edwetl:edwetl@localhost:5432/pdga")
+    print(os.environ)
+    load_dotenv()
+    print('Loaded dotenv')
+    print(os.environ)
+    url_obj = URL.create(
+        "postgresql+psycopg2",
+        username=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASS"),
+        host=os.getenv("POSTGRES_URL"),
+        port=os.getenv("POSTGRES_PORT"),
+        database="pdga"
+    )
+    engine = create_engine(url_obj)
 
     target_date = context.partition_key
 
@@ -101,7 +129,8 @@ def event_details(context: AssetExecutionContext) -> pd.DataFrame:
             con.commit()
             if event_info is not None:
                 results = pd.concat([results, event_info])
-        # anything left in a 1 status means we aleady had data for the event, dro pthe pending request
+            sleep(2)
+        # anything left in a 1 status means we aleady had data for the event, drop the pending request
         con.execute(text(f"delete from pdga.event_requests where status = {request_status.pending} and event_date = '{target_date}'"))
         if len(results) > 0:
             print(f"Writing {len(results)} new events to event_details for {target_date}")
