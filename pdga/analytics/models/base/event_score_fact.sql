@@ -2,8 +2,8 @@
 {{
   config(
     materialized = 'incremental',
-    unique_key = ['event_id', 'player_pdga','round_number'],
-    check_cols = ['event_id', 'player_pdga','round_number'],
+    unique_key = ['event_id', 'player_pdga','round_number','event_division'],
+    check_cols = ['event_id', 'player_pdga','round_number','event_division'],
     on_schema_change = 'sync_all_columns'
   )
 }}
